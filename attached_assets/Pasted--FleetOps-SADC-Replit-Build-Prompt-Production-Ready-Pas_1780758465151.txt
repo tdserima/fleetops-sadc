@@ -1,0 +1,137 @@
+# FleetOps SADC — Replit Build Prompt (Production-Ready)
+
+> Paste **Section A** into Replit Agent as your first message, then drive the build through the milestones in **Section J**. This is a cross-border road-freight platform for carriers in the SADC region. It is metric, multi-currency, and built on SADC regulatory reality — there is **no IFTA** here. Build on **Replit-native infrastructure** (Replit Auth, App Storage, managed Postgres, Deployments).
+
+---
+
+# SECTION A — PROMPT FOR REPLIT AGENT
+
+## 0. Product in one line
+
+**FleetOps SADC lets a cross-border carrier run profitable loads: know the true cost of every border crossing, never get a truck stopped for an expired document, and get paid faster.** It is the operational money-and-compliance layer for fleets of 1–50 trucks running corridors like Johannesburg–Lusaka–Lubumbashi, Durban–Harare, and Walvis Bay–Ndola.
+
+We are **not** building a customs-clearing system, an accounting package, a GPS/telematics platform, or a routed-distance engine. We integrate later. We own **cross-border trip costing + compliance + the cash loop**.
+
+**Target user:** owner-operators, transport managers, and back-office staff at small/mid SADC carriers. Mobile-first (PWA) for drivers; desktop for transport managers and billing.
+
+**Monetization (informs UX, not built in P0):** per-truck-per-month subscription in ZAR/USD. Make per-truck value obvious.
+
+## 1. Tech stack — use Replit-native services (important)
+
+- **Frontend:** React + TypeScript + Tailwind CSS (Replit's default web stack). Ship as an installable **PWA** so drivers can use it on phones.
+- **Backend:** Node + Express (TypeScript) REST API in the same Repl.
+- **Database:** Replit's **managed PostgreSQL** (Neon). Use **Drizzle ORM** with real, committed migrations. Read the connection string from the `DATABASE_URL` secret — do not hardcode.
+- **Auth:** **Use Replit Auth** for sign-in. On top of it, maintain an app-level org/membership layer (below) for multi-tenant roles.
+- **File storage:** **Use App Storage** (Replit Object Storage) for all uploaded files — proof-of-delivery photos, disbursement receipt photos, generated invoice PDFs, generated trip-cost-sheet PDFs, and compliance-document scans. **Never write uploads to the local filesystem** — deployed filesystems are not persistent; everything durable goes to Postgres (data) or App Storage (files).
+- **Secrets:** keep all keys/config in Replit **Secrets**.
+- **Deployment:** target an **Autoscale Deployment** for production. Provide working build + run commands.
+- **Units & money:** distance in **kilometres**, fuel in **litres**, consumption in **L/100km**, weight in **kg/tonnes**. **Multi-currency**: an org has a `base_currency` (default ZAR); every amount stores its own `currency` code (ZAR, USD, BWP, NAD, ZMW, MWK, MZN, TZS, etc.); maintain an editable `fx_rates` table to roll margins up to base currency. Never assume one currency.
+- **Offline-tolerant driver capture:** the driver PWA must queue status updates, disbursement entries, and POD photos **locally (IndexedDB)** and sync to the backend API when signal returns — borders/corridors routinely have no connectivity. The IndexedDB queue is only a sync buffer; the system of record is Postgres + App Storage.
+
+## 2. Auth, tenancy & roles (app-layer isolation)
+
+Replit Auth provides the authenticated identity. Layer multi-tenancy on top **in the application**:
+
+- On first login, create an `org` (the carrier) and an `org_member` row making that user **owner**.
+- `org_members.role` ∈ {`owner`, `transport_manager`, `billing`, `driver`}. Owners invite members (by email/phone) and assign roles.
+- **Server-side tenancy guard (required):** Express middleware resolves the Replit-authenticated user → their org membership, attaches `{ orgId, role }` to the request, and **every DB query is scoped by `org_id`**. Reject any request whose target row's `org_id` ≠ the session org. **Drivers are further restricted** to trips/loads where they are the assigned driver.
+- (Optional defense-in-depth: enable Postgres Row-Level Security keyed on a session `org_id` GUC. App-layer scoping is the primary control.)
+
+## 3. Data model (Postgres via Drizzle)
+
+Every business table has `id` (uuid), `org_id` (uuid, indexed), `created_at`, `updated_at`. All queries scoped by `org_id`.
+
+**orgs** — name, country, company_reg_no, cbrta_operator_no, vat_no, address, billing_email, phone, base_currency (default 'ZAR'), invoice_terms_days (default 30), next_invoice_seq.
+**org_members** — user_id (Replit Auth user), role, display_name, phone.
+**fx_rates** — currency, rate_to_base, as_of. Editable; converts amounts to base currency for rollups.
+**trucks** — fleet_no, registration_no, registration_country, vehicle_type ∈ {truck_tractor_horse, rigid, superlink, interlink, tautliner, flatbed, tanker, tipper, side_tipper, reefer, lowbed_abnormal, box}, gvm_class ∈ {class1_le20t, class2_gt20t}, status ∈ {idle, en_route, loading, at_border, maintenance}, odometer_km, avg_consumption_l_per_100km (default 40), driver_id (fk, null).
+**drivers** — name, phone, nationality, passport_no, status ∈ {available, en_route, loading, resting, off}, loads_completed, linked_user_id (Replit Auth user, null — lets a driver log into the PWA).
+**loads** (consignments) — consignment_no, customer, origin_city, dest_city, corridor, border_posts (text[]), distance_km, cargo_desc, cargo_weight_kg, customs_ref (TIP/SAD), rate, currency, pickup_date, delivered_date (null), truck_id (fk, null), status ∈ {unassigned, assigned, en_route, at_border, delivered}, on_time (bool), pod_url (App Storage). Billing: invoice_number, invoice_status ∈ {open, sent, paid} (default open), invoice_date, due_date, paid_date, invoice_pdf_url. UI-computed: **rate per km = rate / distance_km** (in load currency).
+**trips** — name, truck_id, driver_id, trip_date, status ∈ {planned, active, complete}, advance_total, advance_currency. A trip may fulfil one or more loads.
+**trip_stops** — trip_id, seq, place, lat, lng, country, stop_type ∈ {pickup, dropoff, border, fuel, rest}.
+**disbursements** — trip_id, date, border_post (null), country, charge_type ∈ {bridge_toll, gate_pass, carbon_tax, road_access, road_fund, transit_fee, third_party_insurance, customs_bond, tip_fee, ects_seal, parking, agric_health_permit, weighbridge, fuel, driver_subsistence, fine, escort, other}, amount, currency, paid_by ∈ {driver_advance, company_card, cash, supplier_account}, receipt_url (App Storage, null), notes.
+**border_charge_catalog** — border_post, country, charge_type, default_amount, currency, applies_to ∈ {horse, trailer, combination, per_trip}. Editable reference; shown with a "estimate — confirm current tariff at the border" banner.
+**fuel_purchases** — date, truck_id, country, litres, price_per_litre, currency, total (auto).
+**compliance_documents** — entity_type ∈ {truck, driver, org}, entity_id, doc_type ∈ {cbrta_cross_border_permit, comesa_yellow_card, third_party_insurance, git_insurance, roadworthy_cor, vehicle_registration, operator_license, prdp, drivers_license, passport, work_permit_visa, rtms_certificate, other}, doc_number, issuer, country, issue_date, expiry_date, file_url (App Storage). Computed status: valid / expiring (≤30 days) / expired.
+
+## 4. Core flows (P0)
+
+### 4.1 Cross-border trip costing + driver-advance reconciliation (the wedge)
+Border charges are paid in cash upfront, in mixed currencies, long before the client invoice settles — and margin-per-trip is invisible. Build:
+1. **Plan a trip** (truck + driver + stops: pickup → border(s) → dropoff). For each border, pull expected charges from `border_charge_catalog` to pre-cost.
+2. **Issue a driver advance** (amount + currency).
+3. **Capture disbursements (driver PWA, offline-capable):** at each border/fuel stop, log each charge (type, amount, currency, paid_by) + snap receipt → App Storage. Queue offline, sync later.
+4. **Reconcile:** show **advance − (disbursements paid from advance) = balance owed to/from driver**, plus a breakdown by border and country.
+5. **True trip P&L:** revenue − fuel − border/corridor charges − other disbursements = **net margin** and **cost per km**, converted to base currency via `fx_rates`. Export a **Trip Cost Sheet PDF** (backend route → App Storage).
+KPIs: avg cost/km, border charges this month, outstanding driver-advance balances, net margin per corridor.
+
+### 4.2 Compliance vault (never get stopped at a border)
+- CRUD documents per truck/driver/org with expiry_date + file upload (App Storage).
+- **Border-ready status per truck:** green only if all required docs are valid (cross-border permit, third-party insurance/Yellow Card, roadworthy, registration, and the assigned driver's PrDP + passport).
+- **Expiry alerts** on dashboard (P1: email/WhatsApp at 30/14/7 days). Compliance dashboard: counts valid/expiring/expired, next expiries, and any **blocked** truck (expired required doc). A blocked truck surfaces as a command-centre exception and **cannot be assigned a cross-border load**.
+
+### 4.3 Cash loop (localised)
+unassigned → assign (truck loading) → dispatch (en_route → at_border) → driver marks **Delivered** + uploads **ePOD** (offline-capable) → delivered (truck idle, driver loads_completed += 1). **Delivered + ePOD triggers invoicing.** Billing → **Generate Invoice** (sequential number, status sent, due = today + terms; backend route renders PDF to App Storage). Show invoice with **Download PDF / Copy text / Send** (email or WhatsApp link, explicit button). **Mark Paid** → paid + paid_date.
+**A/R view:** delivered loads with status, amount + currency, invoiced/due dates, days overdue. KPIs: Outstanding A/R (per currency + base rollup), Overdue, Collected 30d, Avg Days to Pay, Ready-to-Invoice.
+
+### 4.4 Dispatch board
+Two panes — Unassigned loads (assign-to-truck) and Fleet assignments (per-truck card: driver, vehicle type, border-ready status, current load, correct action button). Border-blocked trucks visibly flagged and unassignable. Fast, no full reloads.
+
+### 4.5 Fleet & Drivers
+- Trucks CRUD (fleet no, reg + country, vehicle type, GVM class, driver, status, odometer km, avg L/100km). **No fabricated utilisation** — compute from trip/load history or omit.
+- Drivers CRUD (name, phone, nationality, passport). Link compliance docs via the vault.
+
+### 4.6 Command centre (honest)
+Real KPIs: active trucks, loads en route, fleet utilisation (computed), on-time %, revenue today, unassigned, **documents expiring (≤30d)**, **trucks blocked**. Exceptions feed from real state (expiring/expired docs, trucks at border, unassigned, ready-to-invoice, overdue invoices, unreconciled advances). **Map:** static SADC map with pins at each truck's last reported stop/city/border (from seeded lat/lng), labelled "last reported." **No animated/random GPS.**
+
+## 5. Explicitly DO NOT build
+- ❌ Animated/random GPS movement. ❌ Fabricated utilisation. ❌ A self-built routed-distance/optimisation engine sold as accurate (distance = editable estimate, clearly labelled). ❌ Customs clearing / bond acquittal / SAD-500 (capture the customs ref only — we feed clearing agents). ❌ Full accounting (we feed Sage/Xero). ❌ IFTA or any fuel-tax apportionment (does not exist in SADC). ❌ Hours-of-service as a compliance record.
+
+## 6. Routing / trip distance (P1, optional)
+Multi-stop planner over the seeded SADC city + border catalog. Distance = haversine × ~1.2 corridor factor, labelled estimate. Adding a border stop auto-pulls its expected charges into the trip pre-cost. Convenience layer, not source of truth.
+
+## 7. Formulas & seed data
+- **Rate per km** = rate / distance_km (guard ÷0), in load currency.
+- **Trip net margin** = revenue − fuel − border/corridor charges − other disbursements (each converted to base via fx_rates).
+- **Driver-advance balance** = advance_total − Σ(disbursements where paid_by = driver_advance).
+- **Fleet consumption** = Σlitres ÷ Σkm × 100.
+- **Invoice numbering:** sequential per org from orgs.next_invoice_seq, incremented atomically (transaction) on generate.
+- **Days overdue** = today − due_date when positive and status = sent.
+- **Document status:** expired if expiry < today; expiring if within 30 days; else valid.
+
+**Seed SADC place catalog (lat, lng, country) — illustrative, extendable:**
+Cities — Johannesburg ZA (-26.20,28.05), Pretoria ZA (-25.75,28.19), Durban ZA (-29.86,31.02), Cape Town ZA (-33.92,18.42), Polokwane ZA (-23.90,29.45), Gaborone BW (-24.65,25.91), Francistown BW (-21.17,27.51), Windhoek NA (-22.56,17.08), Walvis Bay NA (-22.96,14.51), Bulawayo ZW (-20.15,28.58), Harare ZW (-17.83,31.05), Lusaka ZM (-15.42,28.28), Ndola ZM (-12.97,28.63), Kitwe ZM (-12.80,28.21), Lubumbashi CD (-11.66,27.48), Maputo MZ (-25.97,32.57), Beira MZ (-19.84,34.84), Lilongwe MW (-13.98,33.78), Blantyre MW (-15.79,35.01), Dar es Salaam TZ (-6.79,39.21), Maseru LS (-29.31,27.48), Mbabane SZ (-26.32,31.13).
+Border posts — Beitbridge ZA/ZW (-22.22,29.99), Chirundu ZW/ZM (-16.04,28.85), Kazungula BW/ZM (-17.79,25.26), Kasumbalesa ZM/CD (-12.25,27.79), Lebombo–Ressano Garcia ZA/MZ (-25.43,31.98), Groblersbrug–Martin's Drift ZA/BW (-22.55,28.02), Pioneer Gate–Skilpadshek ZA/BW (-25.78,25.65), Plumtree–Ramokgwebana ZW/BW (-20.49,27.81), Nakonde–Tunduma ZM/TZ (-9.32,32.76), Mwami–Mchinji ZM/MW (-13.80,32.88), Trans-Kalahari–Mamuno BW/NA (-22.28,20.01), Oshikango NA/AO (-17.40,15.91).
+
+**Seed border-charge catalog (editable estimates, "confirm current tariff at the border").** Model the charge *types* a Beitbridge northbound crossing incurs so the demo is realistic: bridge toll, gate pass, road access, road fund/transit fee, carbon tax (separate lines for horse and trailer), third-party insurance (or Yellow Card), customs bond/TIP fee, ECTS seal, parking. Provide a few sample amounts with a loud "verify" banner — never treat any figure as authoritative (tariffs change frequently).
+
+## 8. Design system
+Dark operations-centre look, dense tables, mono tabular numerals. Tailwind tokens: bg #0a0e16, panel #121826, raised #1c2638, lines #222d42; ink #eaf1fb, muted #8896ad, faint #5a6986; accents cyan #22d3ee, lime #a3e635, green #34d399, amber #fbbf24, red #fb6a6a, violet #a78bfa, blue #60a5fa. Fonts: Sora (display), Hanken Grotesk (body), JetBrains Mono (tabular numerals). Status pills, KPI cards, modal forms, toasts. Invoices + trip-cost sheets render as a clean white document for PDF/print. Sidebar nav: **Operations** (Command Centre, Dispatch, Loads, Trips & Costs), **Fleet** (Trucks, Drivers, Compliance Vault), **Finance** (Billing, Fuel). Show currency code beside every amount.
+
+## 9. Demo data
+Owner-only "Load demo fleet" seeds org-scoped realistic SADC data (~10 trucks, ~10 drivers, mixed planned/en-route/delivered cross-border loads, border-charge catalog, compliance docs with varied expiry dates, trips with disbursements + advances). "Reset" clears it.
+
+---
+
+# SECTION J — HOW TO DRIVE THE REPLIT AGENT
+
+Agent 4 is capable but autonomous and usage-priced, so build in **ordered milestones** and keep it on-rails. Paste Section A first, then run these in order, confirming each works before moving on:
+
+1. **Foundation:** React+TS+Tailwind PWA shell + Express API + managed Postgres + Drizzle schema & first migration for all tables in §3. Wire **Replit Auth**. Implement the **server-side tenancy guard** (§2) and org/membership creation on first login. *Checkpoint: log in, an org is created, an authed API route returns only this org's data.*
+2. **Fleet, Drivers, Compliance Vault:** CRUD + **App Storage** for document uploads; border-ready + expiry computation; blocked-truck logic. *Checkpoint: expired doc blocks a truck.*
+3. **Loads + Dispatch board + cash loop:** statuses, assignment, ePOD upload to App Storage, invoice generation via a backend PDF route, A/R KPIs. *Checkpoint: deliver → invoice PDF in App Storage → mark paid.*
+4. **Trips, disbursements, reconciliation, trip-cost PDF:** advances, multi-currency disbursements with receipt photos, fx rollup, net margin + cost/km. *Checkpoint: advance balance + margin compute correctly.*
+5. **Offline driver PWA:** IndexedDB queue for status/disbursement/POD capture with background sync to the API. *Checkpoint: capture offline, reconnect, data appears server-side.*
+6. **Command centre, demo seed/reset, Autoscale Deployment** with build/run commands and Secrets.
+
+**Guardrails — tell the Agent:** use Drizzle migrations for every schema change and **ask before any destructive/data-dropping migration**; keep all keys in Secrets; never write uploads to local disk (App Storage only); don't add libraries, features, or scope beyond the current milestone without asking; preserve the design tokens in §8; metric units + multi-currency everywhere.
+
+## Acceptance criteria (P0 done)
+1. Replit Auth login creates/binds an org; Owner becomes owner. 2. Tenancy guard verified: Org A cannot read/write Org B; drivers see only their trips/loads. 3. Compliance vault: CRUD + files; per-truck border-ready correct; blocked truck is unassignable and shows as exception. 4. Trip costing: plan, advance, multi-currency disbursements with receipts captured **offline then synced**, correct advance balance + net margin + cost/km (base-currency rollup); Trip Cost Sheet PDF in App Storage. 5. Cash loop end-to-end: create → assign → dispatch → offline ePOD → delivered → invoice PDF (correct currency) → send → paid. 6. A/R KPIs correct incl. multi-currency rollup + overdue. 7. Dashboard KPIs/exceptions from real data (no hardcoded utilisation, no random map). 8. Driver PWA: sees only own trips/loads; offline capture + sync works. 9. Demo seed/reset org-scoped. 10. No business data on local filesystem — Postgres (data) + App Storage (files); deployed as an Autoscale Deployment.
+
+## Roadmap (design toward, don't build now)
+- **P1:** trip distance planner; computed utilisation; CSV load import; email/WhatsApp expiry alerts.
+- **P2:** telematics (Cartrack / MiX / Ctrack) for live positions + auto km; COMESA Yellow Card USSD verification; ECTS/customs status; maps-API routed distance.
+- **P3:** Sage/Xero sync; customer consignment-tracking portal; SaaS billing via Stripe/Paystack/Ozow (per-truck-per-month, ZAR/USD); RTMS reporting pack.
+
+Build P0 only. Ship cross-border trip costing + the compliance vault + the ePOD-to-invoice cash loop first — that is the entire reason a SADC carrier pays.

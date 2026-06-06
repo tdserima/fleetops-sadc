@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "FleetOps SADC"
+version = "1.0.0"
+id = "artifacts/fleetops"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19170
+
+[services.development]
+run = "pnpm --filter @workspace/fleetops run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/fleetops", "run", "build" ]
+publicDir = "artifacts/fleetops/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19170"
+BASE_PATH = "/"

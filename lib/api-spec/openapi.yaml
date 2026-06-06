@@ -1,0 +1,2516 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: FleetOps SADC API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: Auth
+    description: Browser and mobile authentication endpoints.
+  - name: Org
+    description: Organisation and membership
+  - name: Trucks
+    description: Fleet truck management
+  - name: Drivers
+    description: Driver management
+  - name: Loads
+    description: Load / consignment management
+  - name: Trips
+    description: Trip and cost management
+  - name: Disbursements
+    description: Trip disbursements
+  - name: Compliance
+    description: Compliance document vault
+  - name: Fuel
+    description: Fuel purchases
+  - name: FxRates
+    description: FX rate management
+  - name: BorderCatalog
+    description: Border charge catalog
+  - name: Storage
+    description: File upload and object storage
+  - name: Dashboard
+    description: KPI and dashboard aggregates
+  - name: Demo
+    description: Demo seed and reset
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  # ─── Auth ───────────────────────────────────────────────────────────────
+  /auth/user:
+    get:
+      tags: [Auth]
+      operationId: getCurrentAuthUser
+      summary: Get the currently authenticated user
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '200':
+          description: Auth status resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUserEnvelope'
+  /login:
+    get:
+      tags: [Auth]
+      operationId: beginBrowserLogin
+      summary: Start the browser OIDC login flow
+      parameters:
+        - name: returnTo
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to the OIDC authorization endpoint.
+  /callback:
+    get:
+      tags: [Auth]
+      operationId: handleBrowserLoginCallback
+      summary: Complete the browser OIDC login flow
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: iss
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uri
+      responses:
+        '302':
+          description: Redirect after login.
+  /logout:
+    get:
+      tags: [Auth]
+      operationId: logoutBrowserSession
+      summary: Clear the session and begin OIDC logout
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '302':
+          description: Redirect to OIDC logout.
+  /mobile-auth/token-exchange:
+    post:
+      tags: [Auth]
+      operationId: exchangeMobileAuthorizationCode
+      summary: Exchange a mobile OIDC code for a session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MobileTokenExchangeRequest'
+      responses:
+        '200':
+          description: Session created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MobileTokenExchangeSuccess'
+        '400':
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /mobile-auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logoutMobileSession
+      summary: Delete a mobile session token
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+      responses:
+        '200':
+          description: Logout processed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutSuccess'
+
+  # ─── Org ────────────────────────────────────────────────────────────────
+  /org:
+    get:
+      tags: [Org]
+      operationId: getOrg
+      summary: Get the current org
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Org'
+    patch:
+      tags: [Org]
+      operationId: updateOrg
+      summary: Update org settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Org'
+
+  /org/members:
+    get:
+      tags: [Org]
+      operationId: listOrgMembers
+      summary: List org members
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrgMember'
+    post:
+      tags: [Org]
+      operationId: inviteOrgMember
+      summary: Invite a new org member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgMemberInvite'
+      responses:
+        '201':
+          description: Invited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgMember'
+
+  /org/members/{memberId}:
+    patch:
+      tags: [Org]
+      operationId: updateOrgMember
+      summary: Update a member's role
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgMemberUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgMember'
+    delete:
+      tags: [Org]
+      operationId: removeOrgMember
+      summary: Remove a member from the org
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Removed
+
+  # ─── FX Rates ────────────────────────────────────────────────────────────
+  /fx-rates:
+    get:
+      tags: [FxRates]
+      operationId: listFxRates
+      summary: List all FX rates for the org
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FxRate'
+    post:
+      tags: [FxRates]
+      operationId: upsertFxRate
+      summary: Create or update an FX rate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FxRateInput'
+      responses:
+        '200':
+          description: Upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FxRate'
+
+  # ─── Trucks ──────────────────────────────────────────────────────────────
+  /trucks:
+    get:
+      tags: [Trucks]
+      operationId: listTrucks
+      summary: List all trucks in the org fleet
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Truck'
+    post:
+      tags: [Trucks]
+      operationId: createTruck
+      summary: Add a truck to the fleet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TruckInput'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Truck'
+
+  /trucks/{truckId}:
+    get:
+      tags: [Trucks]
+      operationId: getTruck
+      summary: Get a single truck
+      parameters:
+        - name: truckId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Truck'
+    patch:
+      tags: [Trucks]
+      operationId: updateTruck
+      summary: Update truck details
+      parameters:
+        - name: truckId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TruckUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Truck'
+    delete:
+      tags: [Trucks]
+      operationId: deleteTruck
+      summary: Remove a truck
+      parameters:
+        - name: truckId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+
+  /trucks/{truckId}/border-ready:
+    get:
+      tags: [Trucks]
+      operationId: getTruckBorderReady
+      summary: Get border-ready status for a truck
+      parameters:
+        - name: truckId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TruckBorderReadyStatus'
+
+  # ─── Drivers ──────────────────────────────────────────────────────────────
+  /drivers:
+    get:
+      tags: [Drivers]
+      operationId: listDrivers
+      summary: List all drivers in the org
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Driver'
+    post:
+      tags: [Drivers]
+      operationId: createDriver
+      summary: Add a driver
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DriverInput'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Driver'
+
+  /drivers/{driverId}:
+    get:
+      tags: [Drivers]
+      operationId: getDriver
+      summary: Get a single driver
+      parameters:
+        - name: driverId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Driver'
+    patch:
+      tags: [Drivers]
+      operationId: updateDriver
+      summary: Update driver details
+      parameters:
+        - name: driverId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DriverUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Driver'
+    delete:
+      tags: [Drivers]
+      operationId: deleteDriver
+      summary: Remove a driver
+      parameters:
+        - name: driverId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+
+  # ─── Loads ────────────────────────────────────────────────────────────────
+  /loads:
+    get:
+      tags: [Loads]
+      operationId: listLoads
+      summary: List loads for the org
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: truckId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Load'
+    post:
+      tags: [Loads]
+      operationId: createLoad
+      summary: Create a new load
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadInput'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Load'
+
+  /loads/{loadId}:
+    get:
+      tags: [Loads]
+      operationId: getLoad
+      summary: Get a single load
+      parameters:
+        - name: loadId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Load'
+    patch:
+      tags: [Loads]
+      operationId: updateLoad
+      summary: Update load details or status
+      parameters:
+        - name: loadId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Load'
+    delete:
+      tags: [Loads]
+      operationId: deleteLoad
+      summary: Delete a load
+      parameters:
+        - name: loadId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+
+  /loads/{loadId}/assign:
+    post:
+      tags: [Loads]
+      operationId: assignLoad
+      summary: Assign a load to a truck
+      parameters:
+        - name: loadId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadAssignment'
+      responses:
+        '200':
+          description: Assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Load'
+
+  /loads/{loadId}/deliver:
+    post:
+      tags: [Loads]
+      operationId: deliverLoad
+      summary: Mark load as delivered and set ePOD URL
+      parameters:
+        - name: loadId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadDelivery'
+      responses:
+        '200':
+          description: Delivered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Load'
+
+  /loads/{loadId}/invoice:
+    post:
+      tags: [Loads]
+      operationId: generateInvoice
+      summary: Generate invoice PDF for a delivered load
+      parameters:
+        - name: loadId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Invoice generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Load'
+
+  /loads/{loadId}/mark-paid:
+    post:
+      tags: [Loads]
+      operationId: markInvoicePaid
+      summary: Mark invoice as paid
+      parameters:
+        - name: loadId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoicePaidUpdate'
+      responses:
+        '200':
+          description: Marked paid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Load'
+
+  # ─── Trips ────────────────────────────────────────────────────────────────
+  /trips:
+    get:
+      tags: [Trips]
+      operationId: listTrips
+      summary: List trips for the org
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: truckId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Trip'
+    post:
+      tags: [Trips]
+      operationId: createTrip
+      summary: Create a new trip
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TripInput'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Trip'
+
+  /trips/{tripId}:
+    get:
+      tags: [Trips]
+      operationId: getTrip
+      summary: Get a single trip with stops and disbursements
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripDetail'
+    patch:
+      tags: [Trips]
+      operationId: updateTrip
+      summary: Update trip details
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TripUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Trip'
+    delete:
+      tags: [Trips]
+      operationId: deleteTrip
+      summary: Delete a trip
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+
+  /trips/{tripId}/cost-sheet:
+    get:
+      tags: [Trips]
+      operationId: getTripCostSheet
+      summary: Get trip P&L / cost sheet (with PDF generation)
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripCostSheet'
+
+  /trips/{tripId}/stops:
+    get:
+      tags: [Trips]
+      operationId: listTripStops
+      summary: List stops for a trip
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TripStop'
+    post:
+      tags: [Trips]
+      operationId: addTripStop
+      summary: Add a stop to a trip
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TripStopInput'
+      responses:
+        '201':
+          description: Added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripStop'
+
+  /trips/{tripId}/stops/{stopId}:
+    delete:
+      tags: [Trips]
+      operationId: deleteTripStop
+      summary: Remove a stop from a trip
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: stopId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+
+  # ─── Disbursements ────────────────────────────────────────────────────────
+  /trips/{tripId}/disbursements:
+    get:
+      tags: [Disbursements]
+      operationId: listDisbursements
+      summary: List disbursements for a trip
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Disbursement'
+    post:
+      tags: [Disbursements]
+      operationId: createDisbursement
+      summary: Log a disbursement on a trip
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisbursementInput'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Disbursement'
+
+  /trips/{tripId}/disbursements/{disbursementId}:
+    patch:
+      tags: [Disbursements]
+      operationId: updateDisbursement
+      summary: Update a disbursement
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: disbursementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisbursementUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Disbursement'
+    delete:
+      tags: [Disbursements]
+      operationId: deleteDisbursement
+      summary: Delete a disbursement
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: disbursementId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+
+  # ─── Compliance Documents ─────────────────────────────────────────────────
+  /compliance-docs:
+    get:
+      tags: [Compliance]
+      operationId: listComplianceDocs
+      summary: List compliance documents for the org
+      parameters:
+        - name: entityType
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: entityId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ComplianceDoc'
+    post:
+      tags: [Compliance]
+      operationId: createComplianceDoc
+      summary: Add a compliance document
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceDocInput'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceDoc'
+
+  /compliance-docs/{docId}:
+    get:
+      tags: [Compliance]
+      operationId: getComplianceDoc
+      summary: Get a single compliance document
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceDoc'
+    patch:
+      tags: [Compliance]
+      operationId: updateComplianceDoc
+      summary: Update a compliance document
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceDocUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceDoc'
+    delete:
+      tags: [Compliance]
+      operationId: deleteComplianceDoc
+      summary: Delete a compliance document
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+
+  # ─── Fuel Purchases ────────────────────────────────────────────────────────
+  /fuel-purchases:
+    get:
+      tags: [Fuel]
+      operationId: listFuelPurchases
+      summary: List fuel purchases for the org
+      parameters:
+        - name: truckId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FuelPurchase'
+    post:
+      tags: [Fuel]
+      operationId: createFuelPurchase
+      summary: Log a fuel purchase
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FuelPurchaseInput'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FuelPurchase'
+
+  /fuel-purchases/{purchaseId}:
+    patch:
+      tags: [Fuel]
+      operationId: updateFuelPurchase
+      summary: Update a fuel purchase
+      parameters:
+        - name: purchaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FuelPurchaseUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FuelPurchase'
+    delete:
+      tags: [Fuel]
+      operationId: deleteFuelPurchase
+      summary: Delete a fuel purchase
+      parameters:
+        - name: purchaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+
+  # ─── Border Charge Catalog ────────────────────────────────────────────────
+  /border-catalog:
+    get:
+      tags: [BorderCatalog]
+      operationId: listBorderCharges
+      summary: List border charge catalog entries
+      parameters:
+        - name: borderPost
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BorderCharge'
+    post:
+      tags: [BorderCatalog]
+      operationId: createBorderCharge
+      summary: Add a border charge catalog entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BorderChargeInput'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BorderCharge'
+
+  /border-catalog/{chargeId}:
+    patch:
+      tags: [BorderCatalog]
+      operationId: updateBorderCharge
+      summary: Update a border charge
+      parameters:
+        - name: chargeId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BorderChargeUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BorderCharge'
+    delete:
+      tags: [BorderCatalog]
+      operationId: deleteBorderCharge
+      summary: Delete a border charge entry
+      parameters:
+        - name: chargeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+
+  # ─── Object Storage ────────────────────────────────────────────────────────
+  /storage/uploads/request-url:
+    post:
+      tags: [Storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned upload URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadUrlRequest'
+      responses:
+        '200':
+          description: Presigned URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadUrlResponse'
+
+  /storage/objects/{objectPath}:
+    get:
+      tags: [Storage]
+      operationId: getStorageObject
+      summary: Serve an uploaded object
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Object content
+
+  # ─── Dashboard KPIs ────────────────────────────────────────────────────────
+  /dashboard/kpis:
+    get:
+      tags: [Dashboard]
+      operationId: getDashboardKpis
+      summary: Get command-centre KPIs and exceptions
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardKpis'
+
+  /dashboard/fleet-map:
+    get:
+      tags: [Dashboard]
+      operationId: getFleetMap
+      summary: Get fleet map data (trucks with last reported position)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FleetMapTruck'
+
+  /dashboard/ar-summary:
+    get:
+      tags: [Dashboard]
+      operationId: getArSummary
+      summary: Get A/R summary KPIs
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArSummary'
+
+  /dashboard/compliance-summary:
+    get:
+      tags: [Dashboard]
+      operationId: getComplianceSummary
+      summary: Get compliance document summary (valid/expiring/expired counts)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceSummary'
+
+  # ─── Demo ──────────────────────────────────────────────────────────────────
+  /demo/seed:
+    post:
+      tags: [Demo]
+      operationId: seedDemoData
+      summary: Seed demo fleet data for the current org (owner only)
+      responses:
+        '200':
+          description: Seeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DemoResult'
+
+  /demo/reset:
+    post:
+      tags: [Demo]
+      operationId: resetDemoData
+      summary: Clear demo data for the current org (owner only)
+      responses:
+        '200':
+          description: Reset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DemoResult'
+
+components:
+  parameters:
+    AuthorizationSessionHeader:
+      name: Authorization
+      in: header
+      required: false
+      description: Opaque session token — `Bearer <sid>`.
+      schema:
+        type: string
+    SessionCookie:
+      name: sid
+      in: cookie
+      required: false
+      description: Browser session cookie.
+      schema:
+        type: string
+
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    LogoutSuccess:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          const: true
+
+    # ─── Auth Schemas ─────────────────────────────────────────────────────
+    AuthUser:
+      type: object
+      required: [id, email, firstName, lastName, profileImageUrl]
+      properties:
+        id:
+          type: string
+        email:
+          type: [string, 'null']
+          format: email
+        firstName:
+          type: [string, 'null']
+        lastName:
+          type: [string, 'null']
+        profileImageUrl:
+          type: [string, 'null']
+
+    AuthUserEnvelope:
+      type: object
+      required: [user]
+      properties:
+        user:
+          oneOf:
+            - $ref: '#/components/schemas/AuthUser'
+            - type: 'null'
+
+    MobileTokenExchangeRequest:
+      type: object
+      required: [code, code_verifier, redirect_uri, state]
+      properties:
+        code:
+          type: string
+          minLength: 1
+        code_verifier:
+          type: string
+          minLength: 1
+        redirect_uri:
+          type: string
+          minLength: 1
+          format: uri
+        state:
+          type: string
+          minLength: 1
+        nonce:
+          type: string
+          minLength: 1
+
+    MobileTokenExchangeSuccess:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+
+    # ─── Org Schemas ──────────────────────────────────────────────────────
+    Org:
+      type: object
+      required: [id, name, baseCurrency, invoiceTermsDays, createdAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        country:
+          type: [string, 'null']
+        companyRegNo:
+          type: [string, 'null']
+        cbrtaOperatorNo:
+          type: [string, 'null']
+        vatNo:
+          type: [string, 'null']
+        address:
+          type: [string, 'null']
+        billingEmail:
+          type: [string, 'null']
+        phone:
+          type: [string, 'null']
+        baseCurrency:
+          type: string
+        invoiceTermsDays:
+          type: integer
+        nextInvoiceSeq:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: [string, 'null']
+          format: date-time
+
+    OrgUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        country:
+          type: string
+        companyRegNo:
+          type: string
+        cbrtaOperatorNo:
+          type: string
+        vatNo:
+          type: string
+        address:
+          type: string
+        billingEmail:
+          type: string
+        phone:
+          type: string
+        baseCurrency:
+          type: string
+        invoiceTermsDays:
+          type: integer
+
+    OrgMember:
+      type: object
+      required: [id, orgId, userId, role, displayName, createdAt]
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        userId:
+          type: string
+        role:
+          type: string
+        displayName:
+          type: [string, 'null']
+        phone:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+
+    OrgMemberInvite:
+      type: object
+      required: [role]
+      properties:
+        displayName:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+
+    OrgMemberUpdate:
+      type: object
+      properties:
+        role:
+          type: string
+        displayName:
+          type: string
+        phone:
+          type: string
+
+    # ─── FX Rate Schemas ─────────────────────────────────────────────────
+    FxRate:
+      type: object
+      required: [id, orgId, currency, rateToBase, asOf]
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        currency:
+          type: string
+        rateToBase:
+          type: number
+        asOf:
+          type: string
+          format: date
+
+    FxRateInput:
+      type: object
+      required: [currency, rateToBase, asOf]
+      properties:
+        currency:
+          type: string
+        rateToBase:
+          type: number
+        asOf:
+          type: string
+          format: date
+
+    # ─── Truck Schemas ────────────────────────────────────────────────────
+    Truck:
+      type: object
+      required: [id, orgId, fleetNo, registrationNo, vehicleType, gvmClass, status, avgConsumptionLPer100km, createdAt]
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        fleetNo:
+          type: string
+        registrationNo:
+          type: string
+        registrationCountry:
+          type: [string, 'null']
+        vehicleType:
+          type: string
+        gvmClass:
+          type: string
+        status:
+          type: string
+        odometerKm:
+          type: [number, 'null']
+        avgConsumptionLPer100km:
+          type: number
+        driverId:
+          type: [string, 'null']
+        driverName:
+          type: [string, 'null']
+        borderReadyStatus:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: [string, 'null']
+          format: date-time
+
+    TruckInput:
+      type: object
+      required: [fleetNo, registrationNo, vehicleType, gvmClass]
+      properties:
+        fleetNo:
+          type: string
+        registrationNo:
+          type: string
+        registrationCountry:
+          type: string
+        vehicleType:
+          type: string
+        gvmClass:
+          type: string
+        status:
+          type: string
+        odometerKm:
+          type: number
+        avgConsumptionLPer100km:
+          type: number
+        driverId:
+          type: string
+
+    TruckUpdate:
+      type: object
+      properties:
+        fleetNo:
+          type: string
+        registrationNo:
+          type: string
+        registrationCountry:
+          type: string
+        vehicleType:
+          type: string
+        gvmClass:
+          type: string
+        status:
+          type: string
+        odometerKm:
+          type: number
+        avgConsumptionLPer100km:
+          type: number
+        driverId:
+          type: [string, 'null']
+
+    TruckBorderReadyStatus:
+      type: object
+      required: [truckId, ready, issues]
+      properties:
+        truckId:
+          type: string
+        ready:
+          type: boolean
+        issues:
+          type: array
+          items:
+            type: string
+
+    # ─── Driver Schemas ───────────────────────────────────────────────────
+    Driver:
+      type: object
+      required: [id, orgId, name, status, loadsCompleted, createdAt]
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        name:
+          type: string
+        phone:
+          type: [string, 'null']
+        nationality:
+          type: [string, 'null']
+        passportNo:
+          type: [string, 'null']
+        status:
+          type: string
+        loadsCompleted:
+          type: integer
+        linkedUserId:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: [string, 'null']
+          format: date-time
+
+    DriverInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        nationality:
+          type: string
+        passportNo:
+          type: string
+        status:
+          type: string
+
+    DriverUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        nationality:
+          type: string
+        passportNo:
+          type: string
+        status:
+          type: string
+
+    # ─── Load Schemas ─────────────────────────────────────────────────────
+    Load:
+      type: object
+      required: [id, orgId, consignmentNo, customer, originCity, destCity, status, currency, invoiceStatus, createdAt]
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        consignmentNo:
+          type: string
+        customer:
+          type: string
+        originCity:
+          type: string
+        destCity:
+          type: string
+        corridor:
+          type: [string, 'null']
+        borderPosts:
+          type: array
+          items:
+            type: string
+        distanceKm:
+          type: [number, 'null']
+        cargoDesc:
+          type: [string, 'null']
+        cargoWeightKg:
+          type: [number, 'null']
+        customsRef:
+          type: [string, 'null']
+        rate:
+          type: [number, 'null']
+        currency:
+          type: string
+        pickupDate:
+          type: [string, 'null']
+          format: date
+        deliveredDate:
+          type: [string, 'null']
+          format: date
+        truckId:
+          type: [string, 'null']
+        truckFleetNo:
+          type: [string, 'null']
+        status:
+          type: string
+        onTime:
+          type: [boolean, 'null']
+        podUrl:
+          type: [string, 'null']
+        invoiceNumber:
+          type: [string, 'null']
+        invoiceStatus:
+          type: string
+        invoiceDate:
+          type: [string, 'null']
+          format: date
+        dueDate:
+          type: [string, 'null']
+          format: date
+        paidDate:
+          type: [string, 'null']
+          format: date
+        invoicePdfUrl:
+          type: [string, 'null']
+        daysOverdue:
+          type: [integer, 'null']
+        ratePerKm:
+          type: [number, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: [string, 'null']
+          format: date-time
+
+    LoadInput:
+      type: object
+      required: [consignmentNo, customer, originCity, destCity, currency]
+      properties:
+        consignmentNo:
+          type: string
+        customer:
+          type: string
+        originCity:
+          type: string
+        destCity:
+          type: string
+        corridor:
+          type: string
+        borderPosts:
+          type: array
+          items:
+            type: string
+        distanceKm:
+          type: number
+        cargoDesc:
+          type: string
+        cargoWeightKg:
+          type: number
+        customsRef:
+          type: string
+        rate:
+          type: number
+        currency:
+          type: string
+        pickupDate:
+          type: string
+          format: date
+
+    LoadUpdate:
+      type: object
+      properties:
+        consignmentNo:
+          type: string
+        customer:
+          type: string
+        originCity:
+          type: string
+        destCity:
+          type: string
+        corridor:
+          type: string
+        borderPosts:
+          type: array
+          items:
+            type: string
+        distanceKm:
+          type: number
+        cargoDesc:
+          type: string
+        cargoWeightKg:
+          type: number
+        customsRef:
+          type: string
+        rate:
+          type: number
+        currency:
+          type: string
+        pickupDate:
+          type: string
+          format: date
+        status:
+          type: string
+
+    LoadAssignment:
+      type: object
+      required: [truckId]
+      properties:
+        truckId:
+          type: string
+
+    LoadDelivery:
+      type: object
+      required: [podUrl]
+      properties:
+        podUrl:
+          type: string
+        deliveredDate:
+          type: string
+          format: date
+        onTime:
+          type: boolean
+
+    InvoicePaidUpdate:
+      type: object
+      required: [paidDate]
+      properties:
+        paidDate:
+          type: string
+          format: date
+
+    # ─── Trip Schemas ─────────────────────────────────────────────────────
+    Trip:
+      type: object
+      required: [id, orgId, name, status, createdAt]
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        name:
+          type: string
+        truckId:
+          type: [string, 'null']
+        truckFleetNo:
+          type: [string, 'null']
+        driverId:
+          type: [string, 'null']
+        driverName:
+          type: [string, 'null']
+        tripDate:
+          type: [string, 'null']
+          format: date
+        status:
+          type: string
+        advanceTotal:
+          type: [number, 'null']
+        advanceCurrency:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: [string, 'null']
+          format: date-time
+
+    TripInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        truckId:
+          type: string
+        driverId:
+          type: string
+        tripDate:
+          type: string
+          format: date
+        advanceTotal:
+          type: number
+        advanceCurrency:
+          type: string
+        loadIds:
+          type: array
+          items:
+            type: string
+
+    TripUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        truckId:
+          type: string
+        driverId:
+          type: string
+        tripDate:
+          type: string
+          format: date
+        status:
+          type: string
+        advanceTotal:
+          type: number
+        advanceCurrency:
+          type: string
+
+    TripDetail:
+      type: object
+      required: [id, orgId, name, status, stops, disbursements, createdAt]
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        name:
+          type: string
+        truckId:
+          type: [string, 'null']
+        truckFleetNo:
+          type: [string, 'null']
+        driverId:
+          type: [string, 'null']
+        driverName:
+          type: [string, 'null']
+        tripDate:
+          type: [string, 'null']
+          format: date
+        status:
+          type: string
+        advanceTotal:
+          type: [number, 'null']
+        advanceCurrency:
+          type: [string, 'null']
+        stops:
+          type: array
+          items:
+            $ref: '#/components/schemas/TripStop'
+        disbursements:
+          type: array
+          items:
+            $ref: '#/components/schemas/Disbursement'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: [string, 'null']
+          format: date-time
+
+    TripCostSheet:
+      type: object
+      required: [tripId, advanceTotal, advanceCurrency, advanceBalance, totalDisbursements, netMargin, costPerKm, disbursementsByBorder, pdfUrl]
+      properties:
+        tripId:
+          type: string
+        advanceTotal:
+          type: [number, 'null']
+        advanceCurrency:
+          type: [string, 'null']
+        advanceBalance:
+          type: number
+        totalDisbursements:
+          type: number
+        fuelCost:
+          type: number
+        borderCost:
+          type: number
+        otherCost:
+          type: number
+        revenue:
+          type: [number, 'null']
+        netMargin:
+          type: number
+        costPerKm:
+          type: [number, 'null']
+        baseCurrency:
+          type: string
+        disbursementsByBorder:
+          type: array
+          items:
+            $ref: '#/components/schemas/BorderCostGroup'
+        pdfUrl:
+          type: [string, 'null']
+
+    BorderCostGroup:
+      type: object
+      required: [borderPost, total, items]
+      properties:
+        borderPost:
+          type: [string, 'null']
+        total:
+          type: number
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Disbursement'
+
+    TripStop:
+      type: object
+      required: [id, tripId, seq, place, country, stopType]
+      properties:
+        id:
+          type: string
+        tripId:
+          type: string
+        seq:
+          type: integer
+        place:
+          type: string
+        lat:
+          type: [number, 'null']
+        lng:
+          type: [number, 'null']
+        country:
+          type: [string, 'null']
+        stopType:
+          type: string
+
+    TripStopInput:
+      type: object
+      required: [seq, place, stopType]
+      properties:
+        seq:
+          type: integer
+        place:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        country:
+          type: string
+        stopType:
+          type: string
+
+    # ─── Disbursement Schemas ──────────────────────────────────────────────
+    Disbursement:
+      type: object
+      required: [id, tripId, date, country, chargeType, amount, currency, paidBy, createdAt]
+      properties:
+        id:
+          type: string
+        tripId:
+          type: string
+        date:
+          type: string
+          format: date
+        borderPost:
+          type: [string, 'null']
+        country:
+          type: string
+        chargeType:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        paidBy:
+          type: string
+        receiptUrl:
+          type: [string, 'null']
+        notes:
+          type: [string, 'null']
+        amountInBase:
+          type: [number, 'null']
+        createdAt:
+          type: string
+          format: date-time
+
+    DisbursementInput:
+      type: object
+      required: [date, country, chargeType, amount, currency, paidBy]
+      properties:
+        date:
+          type: string
+          format: date
+        borderPost:
+          type: string
+        country:
+          type: string
+        chargeType:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        paidBy:
+          type: string
+        receiptUrl:
+          type: string
+        notes:
+          type: string
+
+    DisbursementUpdate:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        borderPost:
+          type: string
+        country:
+          type: string
+        chargeType:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        paidBy:
+          type: string
+        receiptUrl:
+          type: string
+        notes:
+          type: string
+
+    # ─── Compliance Schemas ────────────────────────────────────────────────
+    ComplianceDoc:
+      type: object
+      required: [id, orgId, entityType, entityId, docType, expiryDate, docStatus, createdAt]
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        entityType:
+          type: string
+        entityId:
+          type: string
+        docType:
+          type: string
+        docNumber:
+          type: [string, 'null']
+        issuer:
+          type: [string, 'null']
+        country:
+          type: [string, 'null']
+        issueDate:
+          type: [string, 'null']
+          format: date
+        expiryDate:
+          type: string
+          format: date
+        fileUrl:
+          type: [string, 'null']
+        docStatus:
+          type: string
+        daysUntilExpiry:
+          type: [integer, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: [string, 'null']
+          format: date-time
+
+    ComplianceDocInput:
+      type: object
+      required: [entityType, entityId, docType, expiryDate]
+      properties:
+        entityType:
+          type: string
+        entityId:
+          type: string
+        docType:
+          type: string
+        docNumber:
+          type: string
+        issuer:
+          type: string
+        country:
+          type: string
+        issueDate:
+          type: string
+          format: date
+        expiryDate:
+          type: string
+          format: date
+        fileUrl:
+          type: string
+
+    ComplianceDocUpdate:
+      type: object
+      properties:
+        docNumber:
+          type: string
+        issuer:
+          type: string
+        country:
+          type: string
+        issueDate:
+          type: string
+          format: date
+        expiryDate:
+          type: string
+          format: date
+        fileUrl:
+          type: string
+
+    # ─── Fuel Schemas ─────────────────────────────────────────────────────
+    FuelPurchase:
+      type: object
+      required: [id, orgId, truckId, date, country, litres, pricePerLitre, currency, total, createdAt]
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        truckId:
+          type: string
+        truckFleetNo:
+          type: [string, 'null']
+        date:
+          type: string
+          format: date
+        country:
+          type: string
+        litres:
+          type: number
+        pricePerLitre:
+          type: number
+        currency:
+          type: string
+        total:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+
+    FuelPurchaseInput:
+      type: object
+      required: [truckId, date, country, litres, pricePerLitre, currency]
+      properties:
+        truckId:
+          type: string
+        date:
+          type: string
+          format: date
+        country:
+          type: string
+        litres:
+          type: number
+        pricePerLitre:
+          type: number
+        currency:
+          type: string
+
+    FuelPurchaseUpdate:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        country:
+          type: string
+        litres:
+          type: number
+        pricePerLitre:
+          type: number
+        currency:
+          type: string
+
+    # ─── Border Catalog Schemas ────────────────────────────────────────────
+    BorderCharge:
+      type: object
+      required: [id, borderPost, country, chargeType, defaultAmount, currency, appliesTo]
+      properties:
+        id:
+          type: string
+        borderPost:
+          type: string
+        country:
+          type: string
+        chargeType:
+          type: string
+        defaultAmount:
+          type: number
+        currency:
+          type: string
+        appliesTo:
+          type: string
+
+    BorderChargeInput:
+      type: object
+      required: [borderPost, country, chargeType, defaultAmount, currency, appliesTo]
+      properties:
+        borderPost:
+          type: string
+        country:
+          type: string
+        chargeType:
+          type: string
+        defaultAmount:
+          type: number
+        currency:
+          type: string
+        appliesTo:
+          type: string
+
+    BorderChargeUpdate:
+      type: object
+      properties:
+        defaultAmount:
+          type: number
+        currency:
+          type: string
+        appliesTo:
+          type: string
+
+    # ─── Storage Schemas ──────────────────────────────────────────────────
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name:
+          type: string
+        size:
+          type: integer
+        contentType:
+          type: string
+
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL:
+          type: string
+        objectPath:
+          type: string
+
+    # ─── Dashboard Schemas ─────────────────────────────────────────────────
+    DashboardKpis:
+      type: object
+      required: [activeTrucks, loadsEnRoute, fleetUtilisation, onTimePct, unassignedLoads, trucksBlocked, docsExpiringSoon, readyToInvoice, overdueInvoices, unreciledAdvances, exceptions]
+      properties:
+        activeTrucks:
+          type: integer
+        loadsEnRoute:
+          type: integer
+        fleetUtilisation:
+          type: [number, 'null']
+        onTimePct:
+          type: [number, 'null']
+        unassignedLoads:
+          type: integer
+        trucksBlocked:
+          type: integer
+        docsExpiringSoon:
+          type: integer
+        readyToInvoice:
+          type: integer
+        overdueInvoices:
+          type: integer
+        unreciledAdvances:
+          type: integer
+        exceptions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardException'
+
+    DashboardException:
+      type: object
+      required: [type, message, entityId]
+      properties:
+        type:
+          type: string
+        message:
+          type: string
+        entityId:
+          type: string
+        severity:
+          type: string
+
+    FleetMapTruck:
+      type: object
+      required: [truckId, fleetNo, status, borderReadyStatus]
+      properties:
+        truckId:
+          type: string
+        fleetNo:
+          type: string
+        registrationNo:
+          type: string
+        status:
+          type: string
+        borderReadyStatus:
+          type: string
+        driverName:
+          type: [string, 'null']
+        lastPlace:
+          type: [string, 'null']
+        lat:
+          type: [number, 'null']
+        lng:
+          type: [number, 'null']
+        currentLoad:
+          type: [string, 'null']
+
+    ArSummary:
+      type: object
+      required: [outstandingByBase, overdue, collected30d, avgDaysToPay, readyToInvoice]
+      properties:
+        outstandingByBase:
+          type: number
+        outstandingByCurrency:
+          type: array
+          items:
+            $ref: '#/components/schemas/CurrencyAmount'
+        overdue:
+          type: number
+        collected30d:
+          type: number
+        avgDaysToPay:
+          type: [number, 'null']
+        readyToInvoice:
+          type: integer
+        baseCurrency:
+          type: string
+
+    CurrencyAmount:
+      type: object
+      required: [currency, amount]
+      properties:
+        currency:
+          type: string
+        amount:
+          type: number
+
+    ComplianceSummary:
+      type: object
+      required: [valid, expiring, expired, nextExpiries, blockedTrucks]
+      properties:
+        valid:
+          type: integer
+        expiring:
+          type: integer
+        expired:
+          type: integer
+        nextExpiries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplianceDoc'
+        blockedTrucks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Truck'
+
+    DemoResult:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
